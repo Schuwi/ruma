@@ -25,6 +25,7 @@ impl<'de> Deserialize<'de> for LoginType {
             "m.login.password" => Self::Password(from_raw_json_value(&json)?),
             "m.login.token" => Self::Token(from_raw_json_value(&json)?),
             "m.login.sso" => Self::Sso(from_raw_json_value(&json)?),
+            "m.login.application_service" => Self::ApplicationService(from_raw_json_value(&json)?),
             _ => Self::_Custom(from_raw_json_value(&json)?),
         })
     }

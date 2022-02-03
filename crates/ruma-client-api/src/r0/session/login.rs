@@ -96,6 +96,9 @@ pub enum LoginInfo<'a> {
     /// Token-based login.
     Token(Token<'a>),
 
+    /// Only an identifier is supplied.
+    ApplicationService(Identifier<'a>),
+
     #[doc(hidden)]
     _Custom(CustomLoginInfo<'a>),
 }
@@ -115,6 +118,9 @@ impl IncomingLoginInfo {
         Ok(match login_type {
             "m.login.password" => Self::Password(serde_json::from_value(JsonValue::Object(data))?),
             "m.login.token" => Self::Token(serde_json::from_value(JsonValue::Object(data))?),
+            "m.login.application_service" => {
+                Self::ApplicationService(serde_json::from_value(JsonValue::Object(data))?)
+            }
             _ => Self::_Custom(IncomingCustomLoginInfo {
                 login_type: login_type.into(),
                 extra: data,
@@ -127,6 +133,7 @@ impl IncomingLoginInfo {
         match self {
             Self::Password(a) => LoginInfo::Password(a.to_outgoing()),
             Self::Token(a) => LoginInfo::Token(a.to_outgoing()),
+            Self::ApplicationService(a) => LoginInfo::ApplicationService(a.to_outgoing()),
             Self::_Custom(a) => {
                 LoginInfo::_Custom(CustomLoginInfo { login_type: &a.login_type, extra: &a.extra })
             }
@@ -151,6 +158,7 @@ impl<'de> Deserialize<'de> for IncomingLoginInfo {
         match login_type {
             "m.login.password" => from_json_value(json).map(Self::Password),
             "m.login.token" => from_json_value(json).map(Self::Token),
+            "m.login.application_service" => from_json_value(json).map(Self::ApplicationService),
             _ => from_json_value(json).map(Self::_Custom),
         }
     }
@@ -202,6 +210,30 @@ impl IncomingToken {
     /// Convert `IncomingToken` to `Token`.
     fn to_outgoing(&self) -> Token<'_> {
         Token { token: &self.token }
+    }
+}
+
+/// Only an identifier is supplied as authentication.
+/// Only valid for application services.
+#[derive(Clone, Debug, Outgoing, Serialize)]
+#[cfg_attr(not(feature = "unstable-exhaustive-types"), non_exhaustive)]
+#[serde(tag = "type", rename = "m.login.application_service")]
+pub struct Identifier<'a> {
+    /// Identification information for the virtual user.
+    pub identifier: UserIdentifier<'a>,
+}
+
+impl<'a> Identifier<'a> {
+    /// Creates a new `Identifier` with the given identifier.
+    pub fn new(identifier: UserIdentifier<'a>) -> Self {
+        Self { identifier }
+    }
+}
+
+impl IncomingIdentifier {
+    /// Convert `IncomingIdentifier` to `Identifier`.
+    fn to_outgoing(&self) -> Identifier<'_> {
+        Identifier { identifier: self.identifier.to_outgoing() }
     }
 }
 
@@ -284,7 +316,7 @@ mod tests {
     use matches::assert_matches;
     use serde_json::{from_value as from_json_value, json};
 
-    use super::{IncomingLoginInfo, IncomingPassword, IncomingToken};
+    use super::{IncomingIdentifier, IncomingLoginInfo, IncomingPassword, IncomingToken};
     use crate::r0::uiaa::IncomingUserIdentifier;
 
     #[test]
@@ -312,6 +344,19 @@ mod tests {
             IncomingLoginInfo::Token(IncomingToken { token })
             if token == "1234567890abcdef"
         );
+
+        assert_matches!(
+            from_json_value(json!({
+                "type": "m.login.application_service",
+                "identifier": {
+                  "type": "m.id.user",
+                  "user": "_bridge_alice"
+                }
+              }))
+            .unwrap(),
+            IncomingLoginInfo::ApplicationService(IncomingIdentifier { identifier: IncomingUserIdentifier::MatrixId(user) })
+            if user == "_bridge_alice"
+        );
     }
 
     #[test]
@@ -321,8 +366,10 @@ mod tests {
         use ruma_common::thirdparty::Medium;
         use serde_json::Value as JsonValue;
 
-        use super::{LoginInfo, Password, Request, Token};
+        use super::{Identifier, LoginInfo, Password, Request, Token};
         use crate::r0::uiaa::UserIdentifier;
+
+        // Token
 
         let req: http::Request<Vec<u8>> = Request {
             login_info: LoginInfo::Token(Token { token: "0xdeadbeef" }),
@@ -341,6 +388,8 @@ mod tests {
                 "initial_device_display_name": "test",
             })
         );
+
+        // Password
 
         let req: http::Request<Vec<u8>> = Request {
             login_info: LoginInfo::Password(Password {
@@ -367,6 +416,31 @@ mod tests {
                 },
                 "type": "m.login.password",
                 "password": "deadbeef",
+                "initial_device_display_name": "test",
+            })
+        );
+
+        // Application service
+
+        let req: http::Request<Vec<u8>> = Request {
+            login_info: LoginInfo::ApplicationService(Identifier {
+                identifier: UserIdentifier::MatrixId("_bridge_alice"),
+            }),
+            device_id: None,
+            initial_device_display_name: Some("test"),
+        }
+        .try_into_http_request("https://homeserver.tld", SendAccessToken::None)
+        .unwrap();
+
+        let req_body_value: JsonValue = serde_json::from_slice(req.body()).unwrap();
+        assert_eq!(
+            req_body_value,
+            json!({
+                "identifier": {
+                    "type": "m.id.user",
+                    "user": "_bridge_alice"
+                },
+                "type": "m.login.application_service",
                 "initial_device_display_name": "test",
             })
         );

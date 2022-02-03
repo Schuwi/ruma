@@ -59,6 +59,10 @@ pub enum LoginType {
     /// SSO-based login.
     Sso(SsoLoginType),
 
+    /// An application service can perform login for MXIDs in it's namespace.
+    /// Considered unstable for now. (see https://github.com/matrix-org/matrix-doc/pull/2778)
+    ApplicationService(ApplicationServiceLoginType),
+
     /// Custom login type.
     #[doc(hidden)]
     _Custom(CustomLoginType),
@@ -79,6 +83,7 @@ impl LoginType {
             "m.login.password" => Self::Password(from_json_object(data)?),
             "m.login.token" => Self::Token(from_json_object(data)?),
             "m.login.sso" => Self::Sso(from_json_object(data)?),
+            "m.login.application_service" => Self::ApplicationService(from_json_object(data)?),
             _ => Self::_Custom(CustomLoginType { type_: login_type.to_owned(), data }),
         })
     }
@@ -89,6 +94,7 @@ impl LoginType {
             Self::Password(_) => "m.login.password",
             Self::Token(_) => "m.login.token",
             Self::Sso(_) => "m.login.sso",
+            Self::ApplicationService(_) => "m.login.application_service",
             Self::_Custom(c) => &c.type_,
         }
     }
@@ -109,6 +115,7 @@ impl LoginType {
             Self::Password(d) => Cow::Owned(serialize(d)),
             Self::Token(d) => Cow::Owned(serialize(d)),
             Self::Sso(d) => Cow::Owned(serialize(d)),
+            Self::ApplicationService(d) => Cow::Owned(serialize(d)),
             Self::_Custom(c) => Cow::Borrowed(&c.data),
         }
     }
@@ -216,6 +223,19 @@ pub enum IdentityProviderBrand {
     /// A custom brand.
     #[doc(hidden)]
     _Custom(PrivOwnedStr),
+}
+
+/// The payload for application service login.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[cfg_attr(not(feature = "unstable-exhaustive-types"), non_exhaustive)]
+#[serde(tag = "type", rename = "m.login.application_service")]
+pub struct ApplicationServiceLoginType {}
+
+impl ApplicationServiceLoginType {
+    /// Creates a new `ApplicationServiceLoginType`.
+    pub fn new() -> Self {
+        Self {}
+    }
 }
 
 /// A custom login payload.
